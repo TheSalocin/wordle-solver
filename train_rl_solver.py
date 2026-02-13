@@ -413,7 +413,7 @@ def plot_training_progress(
         return
         
     # Create figure with 4 subplots (2x2 grid)
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(4, 1, figsize=(16, 24))
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(16, 24))
     
     # Subplot 1: Win rate comparison
     ax1.plot(episodes, train_win_rates, 'b-', linewidth=2, label='Train', marker='o', markersize=4)
