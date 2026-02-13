@@ -18,6 +18,68 @@ from game.constants import DEFAULT_GAME_CONFIG
 Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state', 'done'])
 
 
+class CharacterMapper:
+    """
+    Maps characters to indices, supporting both regular letters and German umlauts.
+    
+    Mapping:
+    a-z: indices 0-25
+    ä: index 26
+    ö: index 27
+    ü: index 28
+    """
+    
+    def __init__(self):
+        # Regular letters a-z
+        self.char_to_idx = {chr(ord('a') + i): i for i in range(26)}
+        
+        # German umlauts
+        self.char_to_idx['ä'] = 26
+        self.char_to_idx['ö'] = 27
+        self.char_to_idx['ü'] = 28
+        
+        # Reverse mapping
+        self.idx_to_char = {idx: char for char, idx in self.char_to_idx.items()}
+        
+        self.num_chars = 29
+    
+    def char_to_index(self, char: str) -> int:
+        """
+        Convert character to index.
+        
+        Args:
+            char: Single character (a-z, ä, ö, ü)
+            
+        Returns:
+            Index (0-28)
+            
+        Raises:
+            ValueError: If character is not supported
+        """
+        char_lower = char.lower()
+        if char_lower not in self.char_to_idx:
+            raise ValueError(f"Unsupported character: '{char}'. Supported: a-z, ä, ö, ü")
+        return self.char_to_idx[char_lower]
+    
+    def index_to_char(self, idx: int) -> str:
+        """
+        Convert index to character.
+        
+        Args:
+            idx: Index (0-28)
+            
+        Returns:
+            Character
+        """
+        if idx not in self.idx_to_char:
+            raise ValueError(f"Invalid index: {idx}. Valid range: 0-28")
+        return self.idx_to_char[idx]
+    
+    def get_num_characters(self) -> int:
+        """Get total number of supported characters."""
+        return self.num_chars
+
+
 class WordleQNetwork(nn.Module):
     """
     Deep Q-Network for Wordle.
@@ -67,6 +129,7 @@ class ReplayBuffer:
 class RLSolver(Solver):
     """
     Reinforcement Learning Solver for Wordle using Deep Q-Learning.
+    Supports German umlauts (ä, ö, ü).
     
     This extends the base Solver class with:
     - State encoding from game history
@@ -92,6 +155,10 @@ class RLSolver(Solver):
         device: str = None
     ):
         super().__init__(config, manual, verbose)
+        
+        # Initialize character mapper for umlauts
+        self.char_mapper = CharacterMapper()
+        self.num_chars = self.char_mapper.get_num_characters()  # 29 (a-z + ä, ö, ü)
         
         # RL hyperparameters
         self.learning_rate = learning_rate
@@ -140,17 +207,17 @@ class RLSolver(Solver):
     def _calculate_state_dim(self) -> int:
         """
         Calculate state dimension based on:
-        - Letter frequencies (29 letters)
-        - Position information (N positions × 29 letters)
-        - Excluded letters (29 letters)
-        - Confirmed letters (29 letters)
+        - Letter frequencies (29 characters: a-z + ä, ö, ü)
+        - Position information (N positions × 29 characters)
+        - Excluded letters (29 characters)
+        - Confirmed letters (29 characters)
         - Number of guesses remaining (1 scalar)
         - Previous clue encoding (MAX_GUESSES × N × 3 states)
         """
-        letter_freq_dim = 29
-        position_info_dim = self.N * 29
-        excluded_dim = 29
-        confirmed_dim = 29
+        letter_freq_dim = self.num_chars
+        position_info_dim = self.N * self.num_chars
+        excluded_dim = self.num_chars
+        confirmed_dim = self.num_chars
         guesses_remaining_dim = 1
         clue_history_dim = self.MAX_GUESSES * self.N * 3
         
@@ -169,43 +236,63 @@ class RLSolver(Solver):
         state = np.zeros(self.state_dim, dtype=np.float32)
         idx = 0
         
-        # 1. Letter frequency from candidate set (29 features)
-        letter_counts = np.zeros(29)
+        # 1. Letter frequency from candidate set (29 features: a-z + ä, ö, ü)
+        letter_counts = np.zeros(self.num_chars)
         for word in self.candidate_set:
             for char in word:
-                letter_counts[ord(char) - ord('a')] += 1
+                try:
+                    char_idx = self.char_mapper.char_to_index(char)
+                    letter_counts[char_idx] += 1
+                except ValueError as e:
+                    if self.verbose:
+                        print(f"Warning: {e} in word '{word}'")
+                    continue
         if len(self.candidate_set) > 0:
             letter_counts /= len(self.candidate_set)
-        state[idx:idx+29] = letter_counts
-        idx += 29
+        state[idx:idx+self.num_chars] = letter_counts
+        idx += self.num_chars
         
         # 2. Position-specific letter information (N × 29 features)
-        position_info = np.zeros((self.N, 29))
+        position_info = np.zeros((self.N, self.num_chars))
         for word in self.candidate_set:
             for pos, char in enumerate(word):
-                position_info[pos][ord(char) - ord('a')] += 1
+                try:
+                    char_idx = self.char_mapper.char_to_index(char)
+                    position_info[pos][char_idx] += 1
+                except ValueError:
+                    continue
         if len(self.candidate_set) > 0:
             position_info /= len(self.candidate_set)
-        state[idx:idx+(self.N*29)] = position_info.flatten()
-        idx += (self.N * 29)
+        state[idx:idx+(self.N*self.num_chars)] = position_info.flatten()
+        idx += (self.N * self.num_chars)
         
         # 3. Excluded letters (29 features)
-        excluded = np.zeros(29)
-        for clue in self.clues:
+        excluded = np.zeros(self.num_chars)
+        for clue_idx, clue in enumerate(self.clues):
+            guess = self.guesses[clue_idx]
             for i, c in enumerate(clue):
                 if c == 0:  # Gray letter
-                    excluded[ord(self.guesses[-1][i]) - ord('a')] = 1
-        state[idx:idx+29] = excluded
-        idx += 29
+                    try:
+                        char_idx = self.char_mapper.char_to_index(guess[i])
+                        excluded[char_idx] = 1
+                    except ValueError:
+                        continue
+        state[idx:idx+self.num_chars] = excluded
+        idx += self.num_chars
         
         # 4. Confirmed letters (29 features)
-        confirmed = np.zeros(29)
-        for clue in self.clues:
+        confirmed = np.zeros(self.num_chars)
+        for clue_idx, clue in enumerate(self.clues):
+            guess = self.guesses[clue_idx]
             for i, c in enumerate(clue):
                 if c == 2:  # Green letter
-                    confirmed[ord(self.guesses[-1][i]) - ord('a')] = 1
-        state[idx:idx+29] = confirmed
-        idx += 29
+                    try:
+                        char_idx = self.char_mapper.char_to_index(guess[i])
+                        confirmed[char_idx] = 1
+                    except ValueError:
+                        continue
+        state[idx:idx+self.num_chars] = confirmed
+        idx += self.num_chars
         
         # 5. Guesses remaining (1 feature)
         state[idx] = (self.MAX_GUESSES - self.guess_number) / self.MAX_GUESSES
@@ -307,7 +394,7 @@ class RLSolver(Solver):
         done = (state != 0)
         
         # Store experience
-        if self.current_state is not None:
+        if self.current_state is not None and self.replay_buffer is not None:
             action_idx = self.word_to_idx[self.guesses[-1]]
             experience = Experience(
                 self.current_state,
@@ -319,7 +406,7 @@ class RLSolver(Solver):
             self.replay_buffer.push(experience)
         
         # Train if enough experiences
-        if len(self.replay_buffer) >= self.batch_size:
+        if self.replay_buffer is not None and len(self.replay_buffer) >= self.batch_size:
             self._train_step()
         
         if done:

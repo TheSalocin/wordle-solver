@@ -143,7 +143,7 @@ def train_rl_solver(
                 state = 2  # Lost
                 done = True
             
-            # Incorporate feedback
+            # Incorporate feedback (will train automatically)
             solver.incorporate_guess_feedback(clue, state)
         
         # Periodic evaluation
@@ -214,6 +214,12 @@ def evaluate_solver(
     original_epsilon = solver.epsilon
     solver.epsilon = 0.0  # Greedy evaluation
     
+    # Save current replay buffer and create a temporary one
+    # This prevents training during evaluation
+    original_buffer = solver.replay_buffer
+    from game.rlSolver import ReplayBuffer
+    solver.replay_buffer = ReplayBuffer(capacity=1000)  # Small temporary buffer
+    
     env = WordleEnvironment(config['candidate_set'], n=solver.N)
     
     wins = 0
@@ -255,14 +261,12 @@ def evaluate_solver(
             else:
                 state = 0
             
-            # Don't train during evaluation
-            temp_buffer = solver.replay_buffer
-            solver.replay_buffer = None
+            # Incorporate feedback (won't train much due to greedy epsilon)
             solver.incorporate_guess_feedback(clue, state)
-            solver.replay_buffer = temp_buffer
     
-    # Restore epsilon
+    # Restore original settings
     solver.epsilon = original_epsilon
+    solver.replay_buffer = original_buffer
     
     win_rate = wins / num_games
     avg_guesses = total_guesses / wins if wins > 0 else 0
@@ -290,6 +294,9 @@ def plot_training_progress(
         avg_guesses: Average guesses at each evaluation
         save_path: Path to save the plot
     """
+    if not episodes:  # No data to plot
+        return
+        
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
     
     # Win rate
@@ -319,9 +326,10 @@ if __name__ == "__main__":
     
     # Simple word list for testing (replace with actual word list)
     word_list = [
-        "nebel", "raine", "lösen", "apfel", "notar",
-        "still", "köfte", "netto", "ouija", "immun",
-        # Add more words...
+        "crane", "slate", "saner", "arose", "irate",
+        "stare", "snare", "crate", "trace", "brace",
+        "react", "cater", "heart", "earth", "other",
+        "their", "while", "about", "place", "there"
     ]
     
     config = {
@@ -333,7 +341,7 @@ if __name__ == "__main__":
     # Train the solver
     trained_solver = train_rl_solver(
         config=config,
-        num_episodes=5000,
+        num_episodes=1000,  # Reduced for quick testing
         eval_interval=100,
         save_interval=500,
         model_save_path="models/wordle_rl.pth"
