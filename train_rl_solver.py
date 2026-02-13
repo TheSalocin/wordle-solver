@@ -434,7 +434,7 @@ if __name__ == "__main__":
     
     # CRITICAL: Create train/test split
     train_words, test_words = create_train_test_split(
-        full_answer_words,
+        guess_words,
         test_ratio=0.2,  # 20% for testing
         random_seed=42
     )
