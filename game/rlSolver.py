@@ -505,11 +505,11 @@ class RLSolver(Solver):
         batch = self.replay_buffer.sample(self.batch_size)
         
         # Prepare batch tensors
-        states = torch.FloatTensor([e.state for e in batch]).to(self.device)
+        states = torch.FloatTensor(np.array([e.state for e in batch])).to(self.device)
         actions = torch.LongTensor([e.action for e in batch]).to(self.device)
         rewards = torch.FloatTensor([e.reward for e in batch]).to(self.device)
-        next_states = torch.FloatTensor([e.next_state for e in batch]).to(self.device)
-        dones = torch.FloatTensor([e.done for e in batch]).to(self.device)
+        next_states = torch.FloatTensor(np.array([e.next_state for e in batch])).to(self.device)
+        dones = torch.FloatTensor(np.array([e.done for e in batch])).to(self.device)
         
         # Current Q values
         current_q_values = self.q_network(states).gather(1, actions.unsqueeze(1)).squeeze(1)
