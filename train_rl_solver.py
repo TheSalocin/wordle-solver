@@ -160,6 +160,8 @@ def train_rl_solver(
     test_win_rates = []
     avg_guesses_train = []
     avg_guesses_test = []
+    avg_rewards = []  # Track average reward
+    epsilons = []  # Track epsilon values
     episodes_eval = []
     
     print(f"Starting training for {num_episodes} episodes...")
@@ -222,6 +224,11 @@ def train_rl_solver(
             episodes_eval.append(episode)
             
             stats = solver.get_training_stats()
+            
+            # Track epsilon and average reward
+            epsilons.append(stats['epsilon'])
+            avg_rewards.append(stats['avg_reward_last_100'])
+            
             print(f"Episode {episode}/{num_episodes}")
             print(f"  TRAIN Win Rate: {train_results['win_rate']:.2%}")
             print(f"  TEST Win Rate:  {test_results['win_rate']:.2%}")  # ← Key metric!
@@ -246,6 +253,8 @@ def train_rl_solver(
                 test_win_rates,
                 avg_guesses_train,
                 avg_guesses_test,
+                avg_rewards,
+                epsilons,
                 save_path=f"plots/training_progress_ep{episode}.png"
             )
     
@@ -284,6 +293,8 @@ def train_rl_solver(
         test_win_rates,
         avg_guesses_train,
         avg_guesses_test,
+        avg_rewards,
+        epsilons,
         save_path="plots/final_training_progress.png"
     )
     
@@ -381,10 +392,12 @@ def plot_training_progress(
     test_win_rates: List[float],
     train_avg_guesses: List[float],
     test_avg_guesses: List[float],
+    avg_rewards: List[float],
+    epsilons: List[float],
     save_path: str = "plots/training_progress.png"
 ):
     """
-    Plot training progress with train/test comparison.
+    Plot training progress with train/test comparison plus epsilon and reward tracking.
     
     Args:
         episodes: Episode numbers
@@ -392,33 +405,83 @@ def plot_training_progress(
         test_win_rates: Win rates on test set
         train_avg_guesses: Average guesses on training set
         test_avg_guesses: Average guesses on test set
+        avg_rewards: Average reward per episode
+        epsilons: Epsilon values over time
         save_path: Path to save the plot
     """
     if not episodes:  # No data to plot
         return
         
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+    # Create figure with 4 subplots (2x2 grid)
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
     
-    # Win rate comparison
-    ax1.plot(episodes, train_win_rates, 'b-', linewidth=2, label='Train')
-    ax1.plot(episodes, test_win_rates, 'r-', linewidth=2, label='Test')
-    ax1.set_xlabel('Episode')
-    ax1.set_ylabel('Win Rate')
-    ax1.set_title('Training Progress: Win Rate (Train vs Test)')
-    ax1.legend()
+    # Subplot 1: Win rate comparison
+    ax1.plot(episodes, train_win_rates, 'b-', linewidth=2, label='Train', marker='o', markersize=4)
+    ax1.plot(episodes, test_win_rates, 'r-', linewidth=2, label='Test', marker='s', markersize=4)
+    ax1.set_xlabel('Episode', fontsize=12)
+    ax1.set_ylabel('Win Rate', fontsize=12)
+    ax1.set_title('Training Progress: Win Rate (Train vs Test)', fontsize=14, fontweight='bold')
+    ax1.legend(fontsize=11, loc='lower right')
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim([0, 1])
     
-    # Average guesses comparison
-    ax2.plot(episodes, train_avg_guesses, 'b-', linewidth=2, label='Train')
-    ax2.plot(episodes, test_avg_guesses, 'r-', linewidth=2, label='Test')
-    ax2.set_xlabel('Episode')
-    ax2.set_ylabel('Average Guesses (when won)')
-    ax2.set_title('Training Progress: Average Guesses (Train vs Test)')
-    ax2.legend()
+    # Add fill between to show gap
+    ax1.fill_between(episodes, train_win_rates, test_win_rates, alpha=0.2, color='gray', label='Train-Test Gap')
+    
+    # Subplot 2: Average guesses comparison
+    ax2.plot(episodes, train_avg_guesses, 'b-', linewidth=2, label='Train', marker='o', markersize=4)
+    ax2.plot(episodes, test_avg_guesses, 'r-', linewidth=2, label='Test', marker='s', markersize=4)
+    ax2.set_xlabel('Episode', fontsize=12)
+    ax2.set_ylabel('Average Guesses (when won)', fontsize=12)
+    ax2.set_title('Training Progress: Average Guesses (Train vs Test)', fontsize=14, fontweight='bold')
+    ax2.legend(fontsize=11, loc='upper right')
     ax2.grid(True, alpha=0.3)
     
-    plt.tight_layout()
+    # Subplot 3: Average reward over time
+    ax3.plot(episodes, avg_rewards, 'g-', linewidth=2.5, marker='D', markersize=5)
+    ax3.set_xlabel('Episode', fontsize=12)
+    ax3.set_ylabel('Average Reward (last 100 episodes)', fontsize=12)
+    ax3.set_title('Training Progress: Average Reward', fontsize=14, fontweight='bold')
+    ax3.grid(True, alpha=0.3)
+    ax3.axhline(y=0, color='k', linestyle='--', alpha=0.5, linewidth=1)
+    
+    # Add color fill for positive/negative rewards
+    ax3.fill_between(episodes, 0, avg_rewards, where=[r >= 0 for r in avg_rewards], 
+                     alpha=0.3, color='green', label='Positive')
+    ax3.fill_between(episodes, 0, avg_rewards, where=[r < 0 for r in avg_rewards], 
+                     alpha=0.3, color='red', label='Negative')
+    ax3.legend(fontsize=10, loc='lower right')
+    
+    # Subplot 4: Epsilon decay over time
+    ax4.plot(episodes, epsilons, 'purple', linewidth=2.5, marker='^', markersize=5)
+    ax4.set_xlabel('Episode', fontsize=12)
+    ax4.set_ylabel('Epsilon (Exploration Rate)', fontsize=12)
+    ax4.set_title('Training Progress: Epsilon Decay', fontsize=14, fontweight='bold')
+    ax4.grid(True, alpha=0.3)
+    ax4.set_ylim([0, max(epsilons) * 1.1 if epsilons else 1])
+    
+    # Add annotations for key epsilon values
+    if epsilons:
+        # Mark start epsilon
+        ax4.annotate(f'Start: {epsilons[0]:.3f}', 
+                    xy=(episodes[0], epsilons[0]),
+                    xytext=(10, 20), textcoords='offset points',
+                    fontsize=10, ha='left',
+                    bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.7),
+                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+        
+        # Mark end epsilon
+        ax4.annotate(f'End: {epsilons[-1]:.3f}', 
+                    xy=(episodes[-1], epsilons[-1]),
+                    xytext=(-10, 20), textcoords='offset points',
+                    fontsize=10, ha='right',
+                    bbox=dict(boxstyle='round,pad=0.5', fc='lightblue', alpha=0.7),
+                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+    
+    # Overall title
+    fig.suptitle('Deep Q-Learning Training Dashboard', fontsize=16, fontweight='bold', y=0.995)
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.99])
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     
@@ -460,9 +523,9 @@ if __name__ == "__main__":
     trained_solver = train_rl_solver(
         train_config=train_config,
         test_config=test_config,
-        num_episodes=2000,
-        eval_interval=100,
-        save_interval=500,
+        num_episodes=10000,
+        eval_interval=500,
+        save_interval=1000,
         model_save_path="models/wordle_rl.pth"
     )
     
