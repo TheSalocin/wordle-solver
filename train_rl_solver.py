@@ -1,21 +1,23 @@
-# train_rl_solver.py
+# train_rl_solver_corrected.py
 
 """
-Training script for the RL Wordle Solver.
+Training script for the RL Wordle Solver with PROPER train/test split.
 
-This script demonstrates how to:
-1. Initialize the RLSolver
-2. Run training episodes
-3. Save/load models
-4. Evaluate performance
+BUGS FIXED:
+1. Added train/test split (was evaluating on training data!)
+2. Fixed word length mismatch issue
+3. Added validation that words match expected length
+4. Better error handling
 """
 
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from game.rlSolver import RLSolver
 from game.constants import DEFAULT_GAME_CONFIG
+from game.util import read_to_lines
+
 
 
 class WordleEnvironment:
@@ -27,6 +29,12 @@ class WordleEnvironment:
         self.word_list = word_list
         self.n = n
         self.target_word = None
+        
+        # Validate all words are correct length
+        invalid_words = [w for w in word_list if len(w) != n]
+        if invalid_words:
+            raise ValueError(f"Words must be {n} letters. Invalid: {invalid_words[:5]}")
+        
         self.reset()
     
     def reset(self) -> None:
@@ -42,6 +50,10 @@ class WordleEnvironment:
         """
         if not self.target_word:
             raise ValueError("Environment not initialized. Call reset() first.")
+        
+        # BUGFIX: Validate guess length
+        if len(guess) != self.n:
+            raise ValueError(f"Guess '{guess}' is {len(guess)} letters, expected {self.n}")
         
         clue = [0] * self.n
         target_chars = list(self.target_word)
@@ -68,18 +80,65 @@ class WordleEnvironment:
         return guess == self.target_word
 
 
+def create_train_test_split(
+    word_list: List[str],
+    test_ratio: float = 0.2,
+    random_seed: int = 42
+) -> Tuple[List[str], List[str]]:
+    """
+    Split word list into train and test sets.
+    
+    CRITICAL: Test set should be completely unseen during training!
+    
+    Args:
+        word_list: Full list of words
+        test_ratio: Fraction of words for test set (default 20%)
+        random_seed: Random seed for reproducibility
+    
+    Returns:
+        (train_words, test_words)
+    """
+    np.random.seed(random_seed)
+    
+    # Shuffle words
+    shuffled_words = np.random.permutation(word_list).tolist()
+    
+    # Split
+    test_size = int(len(shuffled_words) * test_ratio)
+    test_words = shuffled_words[:test_size]
+    train_words = shuffled_words[test_size:]
+    
+    print(f"Train/Test Split:")
+    print(f"  Total words: {len(word_list)}")
+    print(f"  Train words: {len(train_words)} ({100*(1-test_ratio):.0f}%)")
+    print(f"  Test words:  {len(test_words)} ({100*test_ratio:.0f}%)")
+    print(f"  Test ratio:  {test_ratio:.2f}")
+    
+    # Verify no overlap
+    train_set = set(train_words)
+    test_set = set(test_words)
+    overlap = train_set & test_set
+    
+    if overlap:
+        raise ValueError(f"Train/test overlap detected! {len(overlap)} words in both sets")
+    
+    return train_words, test_words
+
+
 def train_rl_solver(
-    config: Dict,
+    train_config: Dict,
+    test_config: Dict,
     num_episodes: int = 10000,
     eval_interval: int = 100,
     save_interval: int = 1000,
     model_save_path: str = "models/wordle_rl.pth"
 ):
     """
-    Train the RL solver.
+    Train the RL solver with proper train/test split.
     
     Args:
-        config: Game configuration
+        train_config: Config with TRAINING words
+        test_config: Config with TEST words (unseen during training!)
         num_episodes: Number of training episodes
         eval_interval: Evaluate every N episodes
         save_interval: Save model every N episodes
@@ -90,26 +149,30 @@ def train_rl_solver(
     os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
     os.makedirs("plots", exist_ok=True)
     
-    # Initialize solver
-    solver = RLSolver(config=config, verbose=False)
+    # Initialize solver with TRAINING config
+    solver = RLSolver(config=train_config, verbose=False)
     
-    # Initialize environment
-    env = WordleEnvironment(config['candidate_set'], n=solver.N)
+    # Initialize TRAINING environment
+    train_env = WordleEnvironment(train_config['candidate_set'], n=solver.N)
     
     # Training metrics
-    win_rates = []
-    avg_guesses = []
+    train_win_rates = []
+    test_win_rates = []
+    avg_guesses_train = []
+    avg_guesses_test = []
     episodes_eval = []
     
     print(f"Starting training for {num_episodes} episodes...")
     print(f"State dim: {solver.state_dim}, Action dim: {solver.action_dim}")
     print(f"Device: {solver.device}")
+    print(f"Training on {len(train_config['candidate_set'])} words")
+    print(f"Testing on {len(test_config['candidate_set'])} words (unseen!)")
     print("-" * 60)
     
     for episode in range(1, num_episodes + 1):
         # Reset environment and solver
-        env.reset()
-        solver.candidate_set = list(config['candidate_set'])
+        train_env.reset()
+        solver.candidate_set = list(train_config['candidate_set'])  # Use TRAIN words
         solver.guess_number = 0
         solver.guesses = []
         solver.clues = []
@@ -133,10 +196,10 @@ def train_rl_solver(
                 break
             
             # Get feedback from environment
-            clue = env.get_clue(guess)
+            clue = train_env.get_clue(guess)
             
             # Check if won
-            if env.check_win(guess):
+            if train_env.check_win(guess):
                 state = 1  # Won
                 done = True
             elif solver.guess_number >= solver.MAX_GUESSES:
@@ -148,18 +211,30 @@ def train_rl_solver(
         
         # Periodic evaluation
         if episode % eval_interval == 0:
-            eval_results = evaluate_solver(solver, config, num_games=100)
-            win_rates.append(eval_results['win_rate'])
-            avg_guesses.append(eval_results['avg_guesses'])
+            # BUGFIX: Evaluate on BOTH train and test sets
+            train_results = evaluate_solver(solver, train_config, num_games=100)
+            test_results = evaluate_solver(solver, test_config, num_games=100)
+            
+            train_win_rates.append(train_results['win_rate'])
+            test_win_rates.append(test_results['win_rate'])
+            avg_guesses_train.append(train_results['avg_guesses'])
+            avg_guesses_test.append(test_results['avg_guesses'])
             episodes_eval.append(episode)
             
             stats = solver.get_training_stats()
             print(f"Episode {episode}/{num_episodes}")
-            print(f"  Win Rate: {eval_results['win_rate']:.2%}")
-            print(f"  Avg Guesses: {eval_results['avg_guesses']:.2f}")
+            print(f"  TRAIN Win Rate: {train_results['win_rate']:.2%}")
+            print(f"  TEST Win Rate:  {test_results['win_rate']:.2%}")  # ← Key metric!
+            print(f"  Train Avg Guesses: {train_results['avg_guesses']:.2f}")
+            print(f"  Test Avg Guesses:  {test_results['avg_guesses']:.2f}")
             print(f"  Avg Reward (last 100): {stats['avg_reward_last_100']:.2f}")
             print(f"  Epsilon: {stats['epsilon']:.4f}")
             print(f"  Buffer Size: {stats['buffer_size']}")
+            
+            # BUGFIX: Check for overfitting
+            if train_results['win_rate'] > 0.7 and test_results['win_rate'] < 0.4:
+                print(f"  ⚠️  WARNING: Possible overfitting detected!")
+            
             print("-" * 60)
         
         # Save model periodically
@@ -167,8 +242,10 @@ def train_rl_solver(
             solver.save_model(model_save_path)
             plot_training_progress(
                 episodes_eval, 
-                win_rates, 
-                avg_guesses, 
+                train_win_rates,
+                test_win_rates,
+                avg_guesses_train,
+                avg_guesses_test,
                 save_path=f"plots/training_progress_ep{episode}.png"
             )
     
@@ -177,17 +254,36 @@ def train_rl_solver(
     print(f"\nTraining complete! Model saved to {model_save_path}")
     
     # Final evaluation
-    print("\nFinal Evaluation (1000 games):")
-    final_results = evaluate_solver(solver, config, num_games=1000)
-    print(f"  Win Rate: {final_results['win_rate']:.2%}")
-    print(f"  Avg Guesses: {final_results['avg_guesses']:.2f}")
-    print(f"  Guess Distribution: {final_results['guess_distribution']}")
+    print("\nFinal Evaluation:")
+    print("\nTrain Set (1000 games):")
+    train_final = evaluate_solver(solver, train_config, num_games=1000)
+    print(f"  Win Rate: {train_final['win_rate']:.2%}")
+    print(f"  Avg Guesses: {train_final['avg_guesses']:.2f}")
+    print(f"  Distribution: {train_final['guess_distribution']}")
+    
+    print("\nTest Set (1000 games):")
+    test_final = evaluate_solver(solver, test_config, num_games=1000)
+    print(f"  Win Rate: {test_final['win_rate']:.2%}")
+    print(f"  Avg Guesses: {test_final['avg_guesses']:.2f}")
+    print(f"  Distribution: {test_final['guess_distribution']}")
+    
+    # Overfitting check
+    gap = train_final['win_rate'] - test_final['win_rate']
+    print(f"\nTrain-Test Gap: {gap:.2%}")
+    if gap > 0.15:
+        print("⚠️  WARNING: Model may be overfitting (>15% gap)")
+    elif gap > 0.05:
+        print("⚠️  Slight overfitting detected (>5% gap)")
+    else:
+        print("✓ Good generalization!")
     
     # Plot final results
     plot_training_progress(
-        episodes_eval, 
-        win_rates, 
-        avg_guesses, 
+        episodes_eval,
+        train_win_rates,
+        test_win_rates,
+        avg_guesses_train,
+        avg_guesses_test,
         save_path="plots/final_training_progress.png"
     )
     
@@ -202,9 +298,11 @@ def evaluate_solver(
     """
     Evaluate solver performance.
     
+    BUGFIX: Now properly handles evaluation without training.
+    
     Args:
         solver: Trained RLSolver
-        config: Game configuration
+        config: Game configuration (can be train OR test config!)
         num_games: Number of games to evaluate
     
     Returns:
@@ -212,13 +310,11 @@ def evaluate_solver(
     """
     # Save current epsilon and set to greedy
     original_epsilon = solver.epsilon
-    solver.epsilon = 0.0  # Greedy evaluation
+    solver.epsilon = 0.0  # Greedy evaluation - NO exploration
     
-    # Save current replay buffer and create a temporary one
-    # This prevents training during evaluation
-    original_buffer = solver.replay_buffer
-    from game.rlSolver import ReplayBuffer
-    solver.replay_buffer = ReplayBuffer(capacity=1000)  # Small temporary buffer
+    # BUGFIX: Don't modify replay buffer, just disable training
+    original_batch_size = solver.batch_size
+    solver.batch_size = float('inf')  # Prevents training (buffer never "full enough")
     
     env = WordleEnvironment(config['candidate_set'], n=solver.N)
     
@@ -228,7 +324,7 @@ def evaluate_solver(
     guess_distribution['failed'] = 0
     
     for _ in range(num_games):
-        # Reset
+        # Reset - BUGFIX: Use the passed config, not solver's original config!
         env.reset()
         solver.candidate_set = list(config['candidate_set'])
         solver.guess_number = 0
@@ -261,12 +357,12 @@ def evaluate_solver(
             else:
                 state = 0
             
-            # Incorporate feedback (won't train much due to greedy epsilon)
+            # Incorporate feedback (won't train due to infinite batch_size)
             solver.incorporate_guess_feedback(clue, state)
     
     # Restore original settings
     solver.epsilon = original_epsilon
-    solver.replay_buffer = original_buffer
+    solver.batch_size = original_batch_size
     
     win_rate = wins / num_games
     avg_guesses = total_guesses / wins if wins > 0 else 0
@@ -281,37 +377,45 @@ def evaluate_solver(
 
 def plot_training_progress(
     episodes: List[int],
-    win_rates: List[float],
-    avg_guesses: List[float],
+    train_win_rates: List[float],
+    test_win_rates: List[float],
+    train_avg_guesses: List[float],
+    test_avg_guesses: List[float],
     save_path: str = "plots/training_progress.png"
 ):
     """
-    Plot training progress.
+    Plot training progress with train/test comparison.
     
     Args:
         episodes: Episode numbers
-        win_rates: Win rates at each evaluation
-        avg_guesses: Average guesses at each evaluation
+        train_win_rates: Win rates on training set
+        test_win_rates: Win rates on test set
+        train_avg_guesses: Average guesses on training set
+        test_avg_guesses: Average guesses on test set
         save_path: Path to save the plot
     """
     if not episodes:  # No data to plot
         return
         
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
     
-    # Win rate
-    ax1.plot(episodes, win_rates, 'b-', linewidth=2)
+    # Win rate comparison
+    ax1.plot(episodes, train_win_rates, 'b-', linewidth=2, label='Train')
+    ax1.plot(episodes, test_win_rates, 'r-', linewidth=2, label='Test')
     ax1.set_xlabel('Episode')
     ax1.set_ylabel('Win Rate')
-    ax1.set_title('Training Progress: Win Rate')
+    ax1.set_title('Training Progress: Win Rate (Train vs Test)')
+    ax1.legend()
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim([0, 1])
     
-    # Average guesses
-    ax2.plot(episodes, avg_guesses, 'r-', linewidth=2)
+    # Average guesses comparison
+    ax2.plot(episodes, train_avg_guesses, 'b-', linewidth=2, label='Train')
+    ax2.plot(episodes, test_avg_guesses, 'r-', linewidth=2, label='Test')
     ax2.set_xlabel('Episode')
     ax2.set_ylabel('Average Guesses (when won)')
-    ax2.set_title('Training Progress: Average Guesses')
+    ax2.set_title('Training Progress: Average Guesses (Train vs Test)')
+    ax2.legend()
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
@@ -322,26 +426,41 @@ def plot_training_progress(
 
 
 if __name__ == "__main__":
-    # Example usage
+    # Example usage with PROPER train/test split
     
-    # Simple word list for testing (replace with actual word list)
-    word_list = [
-        "crane", "slate", "saner", "arose", "irate",
-        "stare", "snare", "crate", "trace", "brace",
-        "react", "cater", "heart", "earth", "other",
-        "their", "while", "about", "place", "there"
-    ]
+    # Full word list (replace with actual Wordle words)
+    guess_words = read_to_lines("data/de_leipzig_5_letter.txt")
+    full_answer_words = read_to_lines("data/de_wiktionary_5_letter_shortlist.txt")
     
-    config = {
-        'candidate_set': word_list,
-        'guess_set': word_list,
+    # CRITICAL: Create train/test split
+    train_words, test_words = create_train_test_split(
+        full_answer_words,
+        test_ratio=0.2,  # 20% for testing
+        random_seed=42
+    )
+    
+    # Separate configs for train and test
+    train_config = {
+        'candidate_set': train_words,
+        'guess_set': guess_words,
         'max_guesses': 6
     }
     
+    test_config = {
+        'candidate_set': test_words,
+        'guess_set': guess_words,
+        'max_guesses': 6
+    }
+    
+    print("\n" + "="*60)
+    print("Starting RL Training with Train/Test Split")
+    print("="*60 + "\n")
+    
     # Train the solver
     trained_solver = train_rl_solver(
-        config=config,
-        num_episodes=1000,  # Reduced for quick testing
+        train_config=train_config,
+        test_config=test_config,
+        num_episodes=2000,
         eval_interval=100,
         save_interval=500,
         model_save_path="models/wordle_rl.pth"
