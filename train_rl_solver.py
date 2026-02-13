@@ -413,14 +413,14 @@ def plot_training_progress(
         return
         
     # Create figure with 4 subplots (2x2 grid)
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(4, 1, figsize=(16, 24))
     
     # Subplot 1: Win rate comparison
     ax1.plot(episodes, train_win_rates, 'b-', linewidth=2, label='Train', marker='o', markersize=4)
     ax1.plot(episodes, test_win_rates, 'r-', linewidth=2, label='Test', marker='s', markersize=4)
     ax1.set_xlabel('Episode', fontsize=12)
     ax1.set_ylabel('Win Rate', fontsize=12)
-    ax1.set_title('Training Progress: Win Rate (Train vs Test)', fontsize=14, fontweight='bold')
+    ax1.set_title('Win Rate (Train vs Test)', fontsize=14, fontweight='bold')
     ax1.legend(fontsize=11, loc='lower right')
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim([0, 1])
@@ -433,7 +433,8 @@ def plot_training_progress(
     ax2.plot(episodes, test_avg_guesses, 'r-', linewidth=2, label='Test', marker='s', markersize=4)
     ax2.set_xlabel('Episode', fontsize=12)
     ax2.set_ylabel('Average Guesses (when won)', fontsize=12)
-    ax2.set_title('Training Progress: Average Guesses (Train vs Test)', fontsize=14, fontweight='bold')
+    ax2.set_ylim(0.5, 6.5)
+    ax2.set_title('Average Guesses (Train vs Test)', fontsize=14, fontweight='bold')
     ax2.legend(fontsize=11, loc='upper right')
     ax2.grid(True, alpha=0.3)
     
@@ -441,42 +442,19 @@ def plot_training_progress(
     ax3.plot(episodes, avg_rewards, 'g-', linewidth=2.5, marker='D', markersize=5)
     ax3.set_xlabel('Episode', fontsize=12)
     ax3.set_ylabel('Average Reward (last 100 episodes)', fontsize=12)
-    ax3.set_title('Training Progress: Average Reward', fontsize=14, fontweight='bold')
+    ax3.set_title('Average Reward', fontsize=14, fontweight='bold')
     ax3.grid(True, alpha=0.3)
     ax3.axhline(y=0, color='k', linestyle='--', alpha=0.5, linewidth=1)
     
-    # Add color fill for positive/negative rewards
-    ax3.fill_between(episodes, 0, avg_rewards, where=[r >= 0 for r in avg_rewards], 
-                     alpha=0.3, color='green', label='Positive')
-    ax3.fill_between(episodes, 0, avg_rewards, where=[r < 0 for r in avg_rewards], 
-                     alpha=0.3, color='red', label='Negative')
     ax3.legend(fontsize=10, loc='lower right')
     
     # Subplot 4: Epsilon decay over time
     ax4.plot(episodes, epsilons, 'purple', linewidth=2.5, marker='^', markersize=5)
     ax4.set_xlabel('Episode', fontsize=12)
     ax4.set_ylabel('Epsilon (Exploration Rate)', fontsize=12)
-    ax4.set_title('Training Progress: Epsilon Decay', fontsize=14, fontweight='bold')
+    ax4.set_title('Epsilon Decay', fontsize=14, fontweight='bold')
     ax4.grid(True, alpha=0.3)
     ax4.set_ylim([0, max(epsilons) * 1.1 if epsilons else 1])
-    
-    # Add annotations for key epsilon values
-    if epsilons:
-        # Mark start epsilon
-        ax4.annotate(f'Start: {epsilons[0]:.3f}', 
-                    xy=(episodes[0], epsilons[0]),
-                    xytext=(10, 20), textcoords='offset points',
-                    fontsize=10, ha='left',
-                    bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.7),
-                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
-        
-        # Mark end epsilon
-        ax4.annotate(f'End: {epsilons[-1]:.3f}', 
-                    xy=(episodes[-1], epsilons[-1]),
-                    xytext=(-10, 20), textcoords='offset points',
-                    fontsize=10, ha='right',
-                    bbox=dict(boxstyle='round,pad=0.5', fc='lightblue', alpha=0.7),
-                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
     
     # Overall title
     fig.suptitle('Deep Q-Learning Training Dashboard', fontsize=16, fontweight='bold', y=0.995)
