@@ -27,7 +27,7 @@ class EntropySolver(Solver):
         super().__init__(config, manual, verbose)
         self.DATA_DIR = os.path.join(
             os.path.dirname(os.path.abspath('')),
-            "data",
+            "wordle-solver/data",
         )
         self.PATTERN_MATRIX_FILE = os.path.join(self.DATA_DIR, "pattern_matrix.npy")
         self.WORD_FREQ_FILE = os.path.join(self.DATA_DIR, "de_leipzig_frequencies.csv")
@@ -90,7 +90,7 @@ class EntropySolver(Solver):
             return result
         # Otherwise, regenerate
         freq_map = dict()
-        with open('../data/de_leipzig_frequencies.csv', newline="", encoding="utf-8") as f:
+        with open(self.WORD_FREQ_FILE, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 freq_map[row["word"]] = float(row["rel_freq"])
