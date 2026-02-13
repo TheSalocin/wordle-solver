@@ -424,10 +424,7 @@ def plot_training_progress(
     ax1.legend(fontsize=11, loc='lower right')
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim([0, 1])
-    
-    # Add fill between to show gap
-    ax1.fill_between(episodes, train_win_rates, test_win_rates, alpha=0.2, color='gray', label='Train-Test Gap')
-    
+        
     # Subplot 2: Average guesses comparison
     ax2.plot(episodes, train_avg_guesses, 'b-', linewidth=2, label='Train', marker='o', markersize=4)
     ax2.plot(episodes, test_avg_guesses, 'r-', linewidth=2, label='Test', marker='s', markersize=4)
@@ -445,9 +442,7 @@ def plot_training_progress(
     ax3.set_title('Average Reward', fontsize=14, fontweight='bold')
     ax3.grid(True, alpha=0.3)
     ax3.axhline(y=0, color='k', linestyle='--', alpha=0.5, linewidth=1)
-    
-    ax3.legend(fontsize=10, loc='lower right')
-    
+        
     # Subplot 4: Epsilon decay over time
     ax4.plot(episodes, epsilons, 'purple', linewidth=2.5, marker='^', markersize=5)
     ax4.set_xlabel('Episode', fontsize=12)
