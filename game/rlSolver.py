@@ -148,7 +148,7 @@ class RLSolver(Solver):
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.995,
+        epsilon_decay: float = 0.999,
         batch_size: int = 64,
         buffer_size: int = 100000,
         target_update_freq: int = 1000,
