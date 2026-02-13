@@ -426,7 +426,7 @@ class RLSolver(Solver):
         if state == 1:  # Won
             # Bonus for winning, scaled by efficiency
             remaining_guesses = self.MAX_GUESSES - self.guess_number
-            return 5.0 + (remaining_guesses * 2.0)
+            return 5.0 + (remaining_guesses * 3.0)
         elif state == 2:  # Lost
             return -10.0
         else:  # Ongoing
